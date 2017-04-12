@@ -26,6 +26,7 @@ dependencies {
     })
     compile 'com.android.support:appcompat-v7:25.1.0'
     compile 'com.narayanacharya:WaveView:0.9.1'
+    compile 'com.mcxiaoke.volley:library:1.0.17'
 
     testCompile 'junit:junit:4.12'
 }

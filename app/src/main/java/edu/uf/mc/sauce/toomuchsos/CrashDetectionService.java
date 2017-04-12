@@ -22,6 +22,12 @@ import android.support.annotation.Nullable;
 import android.util.Log;
 import android.widget.Toast;
 
+import com.android.volley.Request;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -238,10 +244,44 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
         return currentSpeed;
     }
 
+    //Sends the SOS message to the server
+    private void sendAlert(boolean notCancel)
+    {
+        String url = "http://192.168.1.18:9090/everest/incident/";
+        if(notCancel)
+            url = url + "report";
+        else
+            url = url + "cancel";
+
+        // Request a string response
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+            new Response.Listener<String>()
+            {
+                @Override
+                public void onResponse(String response)
+                {
+                    // Result handling
+                    System.out.println(response.substring(0,100));
+                }
+            }, new Response.ErrorListener()
+            {
+                @Override
+                public void onErrorResponse(VolleyError error)
+                {
+                    // Error handling
+                    // System.out.println("Something went wrong!");
+                    error.printStackTrace();
+                }
+            });
+        // Add the request to the queue
+        Volley.newRequestQueue(this).add(stringRequest);
+    }
+
     public void sendMessage(String msg)
     {
         if(mConnectedThread != null)
             mConnectedThread.write(msg);
+        sendAlert(true);
     }
 
     // New Class for Connecting Thread
