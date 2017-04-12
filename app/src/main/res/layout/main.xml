@@ -125,5 +125,18 @@
             android:textColor="#fff"
             android:textSize="20dp" />
 
+        <Button
+            android:id="@+id/testBtSend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_above="@id/serviceToggleButton"
+            android:padding="10dp"
+            android:text="SEND TEST MSG"
+            android:background="@color/colorAccent"
+            android:textColor="#fff"
+            android:textSize="20dp"
+            android:layout_marginBottom="20dp"
+            android:onClick="onTestClick"/>
+
     </RelativeLayout>
 </RelativeLayout>

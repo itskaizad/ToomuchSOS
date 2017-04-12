@@ -85,6 +85,13 @@ public class MainActivity extends AppCompatActivity implements SeekBar.OnSeekBar
 
     }
 
+    public void onTestClick(View v)
+    {
+        Toast.makeText(this, "Sending b", Toast.LENGTH_SHORT).show();
+        if(crashDetectionService != null)
+            crashDetectionService.sendMessage("b");
+    }
+
     //Next 3 methods override Seekbar value change.
     @Override
     public void onProgressChanged(SeekBar seekBar, int progress, boolean b)
