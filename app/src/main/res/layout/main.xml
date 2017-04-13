@@ -125,6 +125,7 @@
             android:textColor="#fff"
             android:textSize="20dp" />
 
+        <!--    BUTTON TO TEST FUNCTIONALITY
         <Button
             android:id="@+id/testBtSend"
             android:layout_width="match_parent"
@@ -137,6 +138,7 @@
             android:textSize="20dp"
             android:layout_marginBottom="20dp"
             android:onClick="onTestClick"/>
+        -->
 
     </RelativeLayout>
 </RelativeLayout>

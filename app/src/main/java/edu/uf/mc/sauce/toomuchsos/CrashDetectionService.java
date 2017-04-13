@@ -50,10 +50,13 @@ import java.util.UUID;
 public class CrashDetectionService extends Service implements ShakeDetector.OnShakeListener, GoogleApiClient.ConnectionCallbacks//, BluetoothSPP.AutoConnectionListener, BluetoothSPP.BluetoothConnectionListener, BluetoothSPP.OnDataReceivedListener
 {
     private static final int REMINDER_NOTIFICATION = 11;
+    private static final int SPEED_ACCIDENT_THRESHOLD = 40; //40 mph honey
+    private static final long PIEZO_TIMEOUT_MILLIS = 30000;
     private NotificationManager mNM;
 
     int currentSpeed;
     boolean isPiezo, isGforce;
+    private Handler gTimeoutHandler;
 
     // The following are used for the shake detection
     private SensorManager mSensorManager;
@@ -80,6 +83,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     private StringBuilder recDataString = new StringBuilder();
     private GoogleApiClient mGoogleApiClient;
     private boolean locationApi;
+    private Runnable gRunnable;
 
     @Override
     public void onConnected(@Nullable Bundle bundle) {
@@ -155,6 +159,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                     String readMessage = (String) msg.obj;
                     recDataString.append(readMessage);
                     Log.d("RECORDED", recDataString.toString());
+
                     Toast.makeText(CrashDetectionService.this, "Incoming: " + readMessage, Toast.LENGTH_SHORT).show();
                     handleBtInboundMessage(readMessage);
                 }
@@ -167,9 +172,24 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
 
     }
 
-    private void handleBtInboundMessage(String readMessage) {
+    private void handleBtInboundMessage(String readMessage)
+    {
         if (readMessage.equals("ACCIDENT ALERT"))
-            sendAlert(true);
+        {
+            isPiezo = true;
+            if(currentSpeed < SPEED_ACCIDENT_THRESHOLD)
+            {
+                //Tell the pi to cancel!
+                sendMessage("CANCEL");
+                isPiezo = false;
+                return; //Homie, won't send an alert
+            }
+            else if(isGforce && isPiezo)
+            {
+                //If speed and gForce and Piezo, send an alert!
+                sendAlert(true);
+            }
+        }
         else if (readMessage.equals("CANCEL"))
             sendAlert(false);
 
@@ -178,7 +198,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     private void checkBTState() {
         if (btAdapter == null) {
             Toast.makeText(this, "NOOO BLUETOOTHHHHH!!!", Toast.LENGTH_LONG).show();
-            stopSelf();
+            //stopSelf();
         } else {
             if (btAdapter.isEnabled()) {
                 try {
@@ -191,14 +211,30 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                 }
             } else {
                 Toast.makeText(this, "BLUETOOTHHHHH OFFFF!!!", Toast.LENGTH_LONG).show();
-                stopSelf();
+                //stopSelf();
             }
         }
     }
 
     @Override
-    public void onShake(int count) {
+    public void onShake(int count)
+    {
         Toast.makeText(this, "SHHAAAAAKKKKKKEEEEEEE at speed " + currentSpeed, Toast.LENGTH_LONG).show();
+        isGforce = true;
+        if(gRunnable != null)
+            gTimeoutHandler.removeCallbacks(gRunnable);
+
+        gRunnable = new Runnable() {
+            @Override
+            public void run() {
+                isGforce = false;
+                Toast.makeText(CrashDetectionService.this, "GForce " + isGforce, Toast.LENGTH_SHORT).show();
+            }
+        };
+        gTimeoutHandler = new Handler();
+        gTimeoutHandler.postDelayed(gRunnable, PIEZO_TIMEOUT_MILLIS);
+
+        //Vibrate for feedback
         if (vibrator.hasVibrator())
             vibrator.vibrate(500);
     }
@@ -308,8 +344,9 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
             protected Map<String, String> getParams()
             {
 
-                String latitude = "0";
-                String longitude = "0";
+                String latitude = "29.648761";  //Default CISE :P
+                String longitude = "-82.344195";
+
                 if (mLastLocation != null)
                 {
                     latitude = (String.valueOf(mLastLocation.getLatitude()));
@@ -336,7 +373,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     {
         if(mConnectedThread != null)
             mConnectedThread.write(msg);
-        sendAlert(true);
+        //sendAlert(true);  //This was for testing on the button.
     }
 
     // New Class for Connecting Thread
@@ -356,7 +393,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
             } catch (IOException e) {
                 Log.d("DEBUG BT", "SOCKET CREATION FAILED :" + e.toString());
                 Log.d("BT SERVICE", "SOCKET CREATION FAILED, STOPPING SERVICE");
-                stopSelf();
+                //stopSelf();
             }
             mmSocket = temp;
         }
@@ -382,17 +419,17 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                     Log.d("DEBUG BT", "SOCKET CONNECTION FAILED : " + e.toString());
                     Log.d("BT SERVICE", "SOCKET CONNECTION FAILED, STOPPING SERVICE");
                     mmSocket.close();
-                    stopSelf();
+                    //stopSelf();
                 } catch (IOException e2) {
                     Log.d("DEBUG BT", "SOCKET CLOSING FAILED :" + e2.toString());
                     Log.d("BT SERVICE", "SOCKET CLOSING FAILED, STOPPING SERVICE");
-                    stopSelf();
+                    //stopSelf();
                     //insert code to deal with this
                 }
             } catch (IllegalStateException e) {
                 Log.d("DEBUG BT", "CONNECTED THREAD START FAILED : " + e.toString());
                 Log.d("BT SERVICE", "CONNECTED THREAD START FAILED, STOPPING SERVICE");
-                stopSelf();
+                //stopSelf();
             }
         }
 
@@ -404,7 +441,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                 //insert code to deal with this
                 Log.d("DEBUG BT", e2.toString());
                 Log.d("BT SERVICE", "SOCKET CLOSING FAILED, STOPPING SERVICE");
-                stopSelf();
+                //stopSelf();
             }
         }
     }
@@ -427,7 +464,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
             } catch (IOException e) {
                 Log.d("DEBUG BT", e.toString());
                 Log.d("BT SERVICE", "UNABLE TO READ/WRITE, STOPPING SERVICE");
-                stopSelf();
+                //stopSelf();
             }
 
             mmInStream = tmpIn;
@@ -450,7 +487,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                 } catch (IOException e) {
                     Log.d("DEBUG BT", e.toString());
                     Log.d("BT SERVICE", "UNABLE TO READ/WRITE, STOPPING SERVICE");
-                    stopSelf();
+                    //stopSelf();
                     break;
                 }
             }
@@ -465,7 +502,8 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                 //if you cannot write, close the application
                 Log.d("DEBUG BT", "UNABLE TO READ/WRITE " + e.toString());
                 Log.d("BT SERVICE", "UNABLE TO READ/WRITE, STOPPING SERVICE");
-                stopSelf();
+                Toast.makeText(CrashDetectionService.this, "Failed to write BT message: " + input, Toast.LENGTH_SHORT).show();
+                //stopSelf();
             }
         }
 
@@ -478,7 +516,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                 //insert code to deal with this
                 Log.d("DEBUG BT", e2.toString());
                 Log.d("BT SERVICE", "STREAM CLOSING FAILED, STOPPING SERVICE");
-                stopSelf();
+                //stopSelf();
             }
         }
     }
