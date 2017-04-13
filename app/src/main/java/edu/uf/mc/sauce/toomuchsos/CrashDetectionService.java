@@ -9,16 +9,20 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.location.Location;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Vibrator;
 import android.support.annotation.IntegerRes;
 import android.support.annotation.Nullable;
+import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -27,16 +31,23 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.LocationServices;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
  * Created by Kaizad on 4/9/2017.
  */
-public class CrashDetectionService extends Service implements ShakeDetector.OnShakeListener//, BluetoothSPP.AutoConnectionListener, BluetoothSPP.BluetoothConnectionListener, BluetoothSPP.OnDataReceivedListener
+public class CrashDetectionService extends Service implements ShakeDetector.OnShakeListener, GoogleApiClient.ConnectionCallbacks//, BluetoothSPP.AutoConnectionListener, BluetoothSPP.BluetoothConnectionListener, BluetoothSPP.OnDataReceivedListener
 {
     private static final int REMINDER_NOTIFICATION = 11;
     private NotificationManager mNM;
@@ -59,19 +70,30 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     // SPP UUID service - this should work for most devices
     private static final UUID BTMODULEUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     // String for MAC address
-    private static final String MAC_ADDRESS = "B8:27:EB:7F:E8:F8";
-
+    //
+    //private static final String MAC_ADDRESS = "B8:27:EB:7F:E8:F8";
+    private static final String MAC_ADDRESS = "B8:27:EB:C5:3C:11";
 
     private ConnectingThread mConnectingThread;
     private ConnectedThread mConnectedThread;
 
     private StringBuilder recDataString = new StringBuilder();
+    private GoogleApiClient mGoogleApiClient;
+    private boolean locationApi;
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+        locationApi = true;
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        locationApi = false;
+    }
 
     //Create an inner Binder class
-    public class SOSBinder extends Binder
-    {
-        public CrashDetectionService getService()
-        {
+    public class SOSBinder extends Binder {
+        public CrashDetectionService getService() {
             return CrashDetectionService.this;  //Return this to access the serice later.
         }
     }
@@ -80,17 +102,14 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
 
     @Nullable
     @Override
-    public IBinder onBind(Intent intent)
-    {
+    public IBinder onBind(Intent intent) {
         return binder;
     }
 
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId)
-    {
+    public int onStartCommand(Intent intent, int flags, int startId) {
         //Toast.makeText(this, "STICKY service started", Toast.LENGTH_SHORT).show();
-        if(intent != null && intent.getStringExtra("Speed") != null)
-        {
+        if (intent != null && intent.getStringExtra("Speed") != null) {
             Log.d("SSSSSPPPEEEEEDDDDD", currentSpeed + "");
             currentSpeed = Integer.parseInt(intent.getStringExtra("Speed"));
             //Toast.makeText(this, "Started with " + currentSpeed, Toast.LENGTH_SHORT).show();
@@ -100,13 +119,20 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     }
 
     @Override
-    public void onCreate()
-    {
-        mNM = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+    public void onCreate() {
+        mNM = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         showNotification();
         Toast.makeText(this, "Service initialized", Toast.LENGTH_SHORT).show();
         super.onCreate();
 
+        if (mGoogleApiClient == null) {
+            mGoogleApiClient = new GoogleApiClient.Builder(this)
+                    .addConnectionCallbacks(this)
+                    .addApi(LocationServices.API)
+                    .build();
+
+            mGoogleApiClient.connect();
+        }
 
         // Everything associated with shake goes below.
 
@@ -118,7 +144,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
         mShakeDetector.setOnShakeListener(this);
 
         //Register the listener as soon as service starts
-        mSensorManager.registerListener(mShakeDetector, mAccelerometer,	SensorManager.SENSOR_DELAY_UI);
+        mSensorManager.registerListener(mShakeDetector, mAccelerometer, SensorManager.SENSOR_DELAY_UI);
 
 
         bluetoothIn = new Handler() {
@@ -130,6 +156,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
                     recDataString.append(readMessage);
                     Log.d("RECORDED", recDataString.toString());
                     Toast.makeText(CrashDetectionService.this, "Incoming: " + readMessage, Toast.LENGTH_SHORT).show();
+                    handleBtInboundMessage(readMessage);
                 }
                 recDataString.delete(0, recDataString.length());                    //clear all string data
             }
@@ -140,31 +167,29 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
 
     }
 
-    private void checkBTState()
-    {
-        if(btAdapter == null)
-        {
+    private void handleBtInboundMessage(String readMessage) {
+        if (readMessage.equals("ACCIDENT ALERT"))
+            sendAlert(true);
+        else if (readMessage.equals("CANCEL"))
+            sendAlert(false);
+
+    }
+
+    private void checkBTState() {
+        if (btAdapter == null) {
             Toast.makeText(this, "NOOO BLUETOOTHHHHH!!!", Toast.LENGTH_LONG).show();
             stopSelf();
-        }
-        else
-        {
-            if(btAdapter.isEnabled())
-            {
-                try
-                {
+        } else {
+            if (btAdapter.isEnabled()) {
+                try {
                     BluetoothDevice device = btAdapter.getRemoteDevice(MAC_ADDRESS);
                     mConnectingThread = new ConnectingThread(device);
                     mConnectingThread.start();
-                }
-                catch (Exception e)
-                {
+                } catch (Exception e) {
                     Toast.makeText(this, "NOOO MAC LIKE THAT!!!", Toast.LENGTH_LONG).show();
                     stopSelf();
                 }
-            }
-            else
-            {
+            } else {
                 Toast.makeText(this, "BLUETOOTHHHHH OFFFF!!!", Toast.LENGTH_LONG).show();
                 stopSelf();
             }
@@ -172,31 +197,29 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     }
 
     @Override
-    public void onShake(int count)
-    {
+    public void onShake(int count) {
         Toast.makeText(this, "SHHAAAAAKKKKKKEEEEEEE at speed " + currentSpeed, Toast.LENGTH_LONG).show();
-        if(vibrator.hasVibrator())
+        if (vibrator.hasVibrator())
             vibrator.vibrate(500);
     }
 
 
-    private void showNotification()
-    {
+    private void showNotification() {
         // The PendingIntent to launch our activity if the user selects this notification
-       PendingIntent contentIntent = PendingIntent.getActivity(this, 0,
-       new Intent(this, MainActivity.class), 0);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class), 0);
 
         // Set the info for the views that show in the notification panel.
 
         Notification notification = new Notification.Builder(this)
-            .setSmallIcon(R.mipmap.ic_launcher)   // the status icon
-            .setTicker("Monitoring emergencies...")// the status text
-            .setWhen(System.currentTimeMillis())    // the time stamp
-            .setContentTitle("Too Much Sauce") // the label of the entry
-            .setContentText("Currently monitoring any emergency.")   // the contents of the entry
-            .setContentIntent(contentIntent)    // The intent to send when the entry is clicked
-            .setOngoing(true)       //You can't clear this bitch. Yo understood?!@
-            .build();
+                .setSmallIcon(R.mipmap.ic_launcher)   // the status icon
+                .setTicker("Monitoring emergencies...")// the status text
+                .setWhen(System.currentTimeMillis())    // the time stamp
+                .setContentTitle("Too Much Sauce") // the label of the entry
+                .setContentText("Currently monitoring any emergency.")   // the contents of the entry
+                .setContentIntent(contentIntent)    // The intent to send when the entry is clicked
+                .setOngoing(true)       //You can't clear this bitch. Yo understood?!@
+                .build();
 
         // Send the notification.
         mNM.notify(REMINDER_NOTIFICATION, notification);
@@ -204,15 +227,14 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     }
 
     @Override
-    public void onDestroy()
-    {
+    public void onDestroy() {
         super.onDestroy();
 
         //Cancel persistent notification.
         mNM.cancel(REMINDER_NOTIFICATION);
 
         //Cancel sensor shake listener
-        if(mSensorManager != null)
+        if (mSensorManager != null)
             mSensorManager.unregisterListener(mShakeDetector);
 
         //Disconnect bt
@@ -227,52 +249,85 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
             mConnectingThread.closeSocket();
         }
 
+        //Disconnect Google Location service
+        if (mGoogleApiClient != null)
+            mGoogleApiClient.disconnect();
 
         Toast.makeText(this, "Service stopped.", Toast.LENGTH_SHORT).show();
     }
 
-    public void setSpeed(int speed)
-    {
+    public void setSpeed(int speed) {
         Log.d("SPPPPPEEEEEEEEEDDDDD", "Speed set at " + speed);
         //Toast.makeText(this, "Speed set at " + speed, Toast.LENGTH_SHORT).show();
         currentSpeed = speed;
     }
 
-    public int getSpeed()
-    {
+    public int getSpeed() {
         //Toast.makeText(this, "Speed returned " + currentSpeed, Toast.LENGTH_SHORT).show();
         return currentSpeed;
     }
 
     //Sends the SOS message to the server
-    private void sendAlert(boolean notCancel)
-    {
-        String url = "http://192.168.1.18:9090/everest/incident/";
-        if(notCancel)
+    private void sendAlert(boolean notCancel) {
+        String url = "http://192.168.0.12:9090/everest/incident/";
+        if (notCancel)
             url = url + "report";
         else
             url = url + "cancel";
 
+        @SuppressWarnings({"MissingPermission"})
+        final Location mLastLocation = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient);
+
         // Request a string response
-        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+        StringRequest stringRequest = new StringRequest(Request.Method.POST, url,
             new Response.Listener<String>()
             {
                 @Override
                 public void onResponse(String response)
                 {
-                    // Result handling
-                    System.out.println(response.substring(0,100));
+                    try {
+                        JSONObject jsonResponse = new JSONObject(response).getJSONObject("form");
+                        String site = jsonResponse.getString("site"),
+                                network = jsonResponse.getString("network");
+                        System.out.println("Site: "+site+"\nNetwork: "+network);
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                    }
                 }
-            }, new Response.ErrorListener()
+            },
+            new Response.ErrorListener()
             {
                 @Override
                 public void onErrorResponse(VolleyError error)
                 {
-                    // Error handling
-                    // System.out.println("Something went wrong!");
                     error.printStackTrace();
                 }
-            });
+            }
+        ) {
+            @Override
+            protected Map<String, String> getParams()
+            {
+
+                String latitude = "0";
+                String longitude = "0";
+                if (mLastLocation != null)
+                {
+                    latitude = (String.valueOf(mLastLocation.getLatitude()));
+                    longitude = (String.valueOf(mLastLocation.getLongitude()));
+                }
+                Map<String, String> params = new HashMap<>(
+
+                );
+                // the POST parameters:
+
+                params.put("uuid", BTMODULEUUID.toString());
+                params.put("lat", latitude);
+                params.put("lng", longitude);
+                return params;
+            }
+        };
+
+
         // Add the request to the queue
         Volley.newRequestQueue(this).add(stringRequest);
     }
