@@ -186,8 +186,15 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
             }
             else if(isGforce && isPiezo)
             {
+                sendMessage("ACCIDENT");
                 //If speed and gForce and Piezo, send an alert!
                 sendAlert(true);
+            }
+            else
+            {
+                //Cancel all alerts
+                sendMessage("CANCEL");
+                isPiezo = false;
             }
         }
         else if (readMessage.equals("CANCEL"))
@@ -305,7 +312,7 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
 
     //Sends the SOS message to the server
     private void sendAlert(boolean notCancel) {
-        String url = "http://192.168.0.12:9090/everest/incident/";
+        String url = "http://10.136.22.65:9090/everest/incident/";
         if (notCancel)
             url = url + "report";
         else
@@ -377,7 +384,8 @@ public class CrashDetectionService extends Service implements ShakeDetector.OnSh
     }
 
     // New Class for Connecting Thread
-    private class ConnectingThread extends Thread {
+    private class ConnectingThread extends Thread
+    {
         private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
 
